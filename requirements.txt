@@ -1,0 +1,8 @@
+manim
+edge-tts
+nest-asyncio
+faster-whisper
+playwright
+markdown
+langchain-google-genai
+langchain_groq
