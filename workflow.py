@@ -65,16 +65,50 @@ async def generate_scene(state: SceneState):
 
     if idx == 0:
         prompt_template = ChatPromptTemplate.from_messages([
-            ("system", "You are a master video slide designer creating the INTRODUCTION video ONLY. Focus your voiceover script and slides purely on the provided introduction text... (Keep your exact prompt here)"),
-            ("user", "Introduction: {intro}\n\nList of all topics for context:\n{topics}")
+               ("system", """
+        DO NOT welcome the viewer. The intro and other topics are for context only. Focus entirely on teaching '{topic_text}'.
+        Max 3 slides.if other slide cam do the task not use markdown slide .
+        SLIDE GENERATION RULES:
+        1. You MUST start with a `banner_slide` to introduce this specific topic chapter.
+        2. Follow with one or more additional slides chosen from this toolkit (Note: all templates support basic HTML. use <br> to break line):
+           - MarkdownSlide: Keep text concise (max 6-7 lines).
+           - EmojiTextSlide: Use for punchy, highly visual facts. Use emojis sparingly.
+           - BulletListSlide: Best for sequential steps or standard lists.
+           - GridSlide: BEST FOR breaking down sub-categories, types, or showing 3 to 6 key data points.use any emoji at starting of sentence.
+           - ChartSlide: Use to compare numerical data or show simple statistics using a bar chart.
+           - QuestionSlide: Use to ask thought-provoking questions, introduce a quiz, or transition to a new idea.
+           - AiImage: Use to show a full-screen, high-quality AI-generated image. Provide a highly detailed visual prompt.only for drawing object and things. Do not try to draw which have text rendering or graph.
+           - ManimSlide: BEST FOR mathematical concepts, 2D/3D geometry, plotting graphs, or dynamic technical animations. Provide a detailed visual `prompt`.if needed generate more slide do not try to keep all in single slide.
+        CRITICAL RULE: Do NOT output any conversational text, explanations Be completely silent other than the tool call.
+        Voice will be played at background you will provided.voice text must be detailed.
+        Ensure the voiceover text is educational, clear, and perfectly matches the visual pace and detailed."""),
+        ("user", "Current Topic ({index}): {topic_text}\n\nIntroduction for context: {intro}\nAll Topics for context:\n{topics}")
+
         ])
         chain = prompt_template | current_llm.with_structured_output(intro_scene_output)
         res = await chain.ainvoke({"intro": state["introduction"], "topics": topics_context})
         slides_to_render = [res["intro_slide"]] + res["additional_slides"]
     else:
         prompt_template = ChatPromptTemplate.from_messages([
-            ("system", "DO NOT welcome the viewer. The intro and other topics are for context only. Focus entirely on teaching '{topic_text}'... (Keep your exact prompt here)"),
-            ("user", "Current Topic ({index}): {topic_text}\n\nIntroduction for context: {intro}\nAll Topics for context:\n{topics}")
+               ("system", """
+        DO NOT welcome the viewer. The intro and other topics are for context only. Focus entirely on teaching '{topic_text}'.
+        Max 3 slides.if other slide cam do the task not use markdown slide .
+        SLIDE GENERATION RULES:
+        1. You MUST start with a `banner_slide` to introduce this specific topic chapter.
+        2. Follow with one or more additional slides chosen from this toolkit (Note: all templates support basic HTML. use <br> to break line):
+           - MarkdownSlide: Keep text concise (max 6-7 lines).
+           - EmojiTextSlide: Use for punchy, highly visual facts. Use emojis sparingly.
+           - BulletListSlide: Best for sequential steps or standard lists.
+           - GridSlide: BEST FOR breaking down sub-categories, types, or showing 3 to 6 key data points.use any emoji at starting of sentence.
+           - ChartSlide: Use to compare numerical data or show simple statistics using a bar chart.
+           - QuestionSlide: Use to ask thought-provoking questions, introduce a quiz, or transition to a new idea.
+           - AiImage: Use to show a full-screen, high-quality AI-generated image. Provide a highly detailed visual prompt.only for drawing object and things. Do not try to draw which have text rendering or graph.
+           - ManimSlide: BEST FOR mathematical concepts, 2D/3D geometry, plotting graphs, or dynamic technical animations. Provide a detailed visual `prompt`.if needed generate more slide do not try to keep all in single slide.
+        CRITICAL RULE: Do NOT output any conversational text, explanations Be completely silent other than the tool call.
+        Voice will be played at background you will provided.voice text must be detailed.
+        Ensure the voiceover text is educational, clear, and perfectly matches the visual pace and detailed."""),
+        ("user", "Current Topic ({index}): {topic_text}\n\nIntroduction for context: {intro}\nAll Topics for context:\n{topics}")
+
         ])
         chain = prompt_template | current_llm.with_structured_output(topic_scene_output)
         res = await chain.ainvoke({"index": idx, "topic_text": state["topic_text"], "intro": state["introduction"], "topics": topics_context})
