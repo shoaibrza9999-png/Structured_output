@@ -42,7 +42,33 @@ groq_model_pool = [
 def get_random_groq_model():
     return random.choice(groq_model_pool)
 
-CODER_SYSTEM_PROMPT = """You are an expert Python developer and Manim Animation Director specializing strictly in Manim Community v0.20.1... (KEEP YOUR EXACT PROMPT HERE)"""
+CODER_SYSTEM_PROMPT = """You are an expert Python developer and Manim Animation Director specializing strictly in Manim Community v0.20.1.
+Your task is to translate a highly specific mathematical animation plan into flawless, executable Manim code.
+
+CRITICAL OUTPUT RULES (FAILURE IS NOT AN OPTION):
+1. RAW CODE ONLY: You must output ONLY valid Python code. Do NOT wrap the code in ```python markdown blocks. Do NOT include any conversational text, explanations, or greetings.
+2. REQUIRED STRUCTURE: Always start your script with `from manim import *`. Create exactly one main class inheriting from the appropriate Scene type (e.g., `class GeneratedScene(Scene):` or `class GeneratedScene(ThreeDScene):`).
+
+STRICT ANIMATION & TIMING RULES:
+3. TIMING MATCHING: You must synchronize the `run_time` of your `self.play()` animations to perfectly match the exact durations given in the VISUAL PLAN.
+4. PADDING WITH WAIT: Use `self.wait(X)` to pad out the exact remaining time as instructed by the plan. You MUST NOT ever generate `self.wait(0)`. If the remaining wait time is zero, omit the wait command entirely.
+5. NO AUDIO LOGIC: Do not write any code to import, play, or sync audio tracks. Generate the visual Python code only.
+
+MANIM v0.20.1 SYNTAX RULES:
+6. POSITIONAL ARGS FIRST: In `self.play()`, ALL positional arguments MUST come BEFORE keyword arguments. Never place an animation without a keyword after a keyword argument like `run_time=2`.
+7. RATE FUNCTIONS: Never use `func.`. Always pass rate functions explicitly as keyword arguments using `rate_functions.` (e.g., `rate_func=rate_functions.linear`).
+8. CREATING MULTIPLE OBJECTS: `FadeIn` accepts multiple mobjects, but `Create()` and `Write()` strictly take ONLY ONE Mobject. To create a list of items, you MUST wrap them in a `VGroup` first (e.g., `self.play(Create(VGroup(*my_list)))`).
+9. THE .ANIMATE TRAP: NEVER pass `run_time` or `rate_func` inside an `.animate` call (e.g., `obj.animate.move_to(UP, run_time=2)` is FATAL). Keyword arguments MUST ONLY be passed directly to `self.play()`.
+10. COLORS: Strictly use the 6-character Hex codes provided in the plan (e.g., `color="#FF0000"`). NEVER use Manim's built-in text color names.
+
+3D SCENE RULES (IF APPLICABLE):
+11. INSTANT CAMERA SETUP: Use `self.set_camera_orientation(phi=..., theta=...)` as a standalone command. NEVER put this inside `self.play()`.
+12. CONTINUOUS CAMERA ROTATION: To smoothly spin the camera over time, use `self.begin_ambient_camera_rotation(rate=...)`, followed by `self.wait(time)`, and end with `self.stop_ambient_camera_rotation()`.
+
+GRAPH RULE
+13. ALWAYS USE LABEL:in default label graph with numbers,etc.you can also generate without labels.
+You will be provided with a VISUAL PLAN and highly specific REQUIRED DOCUMENTATION. You MUST strictly obey the parameters listed in the documentation.
+"""
 
 async def generate_agentic_manim_slide(prompt: str, audio_path: str, output_filename: str, max_retries=3):
     base_name = output_filename.replace('.mp4', '')
@@ -51,23 +77,25 @@ async def generate_agentic_manim_slide(prompt: str, audio_path: str, output_file
     print("⏳ Running Whisper for exact timestamps...")
     formatted_voice_text = await get_whisper_timestamps(audio_path)
 
-    # Note: If generate_thinking_plan and get_docs are defined elsewhere, import them. 
-    # Otherwise, ensure they are placed above this function.
-    # plan_data = await asyncio.to_thread(generate_thinking_plan, prompt, formatted_voice_text)
-    # retrieved_docs = await asyncio.to_thread(get_docs, plan_data.required_functions)
-    
-    # For the sake of space, skipping the exact implementation of generate_thinking_plan 
-    # since it was complete in your original code. Just call it here.
+    # 1. Fully restored Thinking & Planning calls
+    print("🧠 Thinking LLM Planning...")
+    think_prompt = f"{prompt}"
+    plan_data = await asyncio.to_thread(generate_thinking_plan, think_prompt, formatted_voice_text)
 
-    coder_prompt = CODER_SYSTEM_PROMPT + f"\n\nVISUAL PLAN:\n(Add plan data)\n\nWrite the Manim script now:"
-    
+    print(f"📄 Fetching docs for: {plan_data.required_functions}")
+    retrieved_docs = await asyncio.to_thread(get_docs, plan_data.required_functions)
+
+    # 2. Injecting the retrieved data into the Coder Prompt
+    coder_prompt = CODER_SYSTEM_PROMPT + f"\n\nVISUAL PLAN:\n{plan_data.animation_plan}\n\nREQUIRED DOCUMENTATION:\n{retrieved_docs}\n\nWrite the Manim script now:"
+
     attempt = 1
+    syntax_valid = False
     manim_success = False
 
     while attempt <= max_retries:
         print(f"\n🔄 Manim Coding Attempt {attempt} of {max_retries}...")
-        
-        current_coder_llm = get_random_groq_model()
+
+        current_coder_llm = llm_coder
         res = await current_coder_llm.ainvoke(coder_prompt)
         code = res.content.strip()
         code = re.sub(r"^```python\s*|^```\s*|```$", "", code, flags=re.MULTILINE).strip()
@@ -110,8 +138,20 @@ async def generate_agentic_manim_slide(prompt: str, audio_path: str, output_file
                 error_msg = "\n".join(stderr.decode().split("\n")[-20:])
                 os.remove(unique_script_name) 
 
+        # 3. Restored Error Document extraction for the retry loop
         print(f"⚠️ Render failed. Updating prompt with errors (Attempt {attempt})...")
-        coder_prompt += f"\n\nATTEMPT {attempt} FAILED.\nERROR TRACEBACK:\n{error_msg}\nREWRITE THE CODE."
+        error_specific_docs = await asyncio.to_thread(extract_error_docs, error_msg)
+        
+        coder_prompt += f"""\n\n===================================
+ATTEMPT {attempt} FAILED.
+FAILED CODE:
+{code}
+ERROR TRACEBACK:
+{error_msg}
+HINT DOCUMENTS FOR FIX:
+{error_specific_docs}
+REWRITE THE CODE FIXING THIS SPECIFIC ERROR. Output ONLY raw code.
+==================================="""
         attempt += 1
 
     if not manim_success:
@@ -123,7 +163,8 @@ async def generate_agentic_manim_slide(prompt: str, audio_path: str, output_file
         fallback_chain = fallback_prompt | llm_gemini.with_structured_output(FallbackSlide)
         fallback_data = await fallback_chain.ainvoke({"prompt": prompt})
 
-        communicate = edge_tts.Communicate(fallback_data.voice, "en-US-AriaNeural")
+        # 4. Changed voice to GuyNeural
+        communicate = edge_tts.Communicate(fallback_data.voice, "en-US-GuyNeural")
         await communicate.save(audio_path)
         fallback_audio_dur = await get_audio_duration(audio_path)
 
@@ -135,7 +176,7 @@ async def generate_agentic_manim_slide(prompt: str, audio_path: str, output_file
 
     print("\n🎞️ Merging Manim animation with Audio...")
     dur_a = await get_audio_duration(audio_path)
-    dur_v = await get_video_duration(raw_manim_vid) # Make sure get_video_duration is imported!
+    dur_v = await get_video_duration(raw_manim_vid)
     target_dur = max(dur_a, dur_v)
 
     cmd = (
