@@ -26,7 +26,7 @@ async def planner(state: GraphState):
         ("user", "{prompt}")
     ])
 
-    current_llm = get_random_groq_model()
+    current_llm = llm_gemini()
     chain = prompt_template | current_llm.with_structured_output(GraphState) # Assuming GraphState or a similar dict output
     res = await chain.ainvoke({"prompt": state["prompt"]})
 
